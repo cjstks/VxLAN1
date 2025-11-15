@@ -1,0 +1,961 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>VXLAN 3D 네트워크 - Underlay/Overlay</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        body {
+            font-family: Arial, sans-serif;
+            background: #ffffff;
+            color: #333;
+        }
+        .header {
+            background: linear-gradient(135deg, #2c3e50 0%, #3498db 100%);
+            box-shadow: 0 4px 6px rgba(0,0,0,0.1);
+            padding: 15px 30px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+        .header h1 {
+            font-size: 24px;
+            color: white;
+        }
+        .controls {
+            display: flex;
+            gap: 20px;
+            align-items: center;
+        }
+        .control-group {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            background: rgba(255,255,255,0.2);
+            padding: 8px 12px;
+            border-radius: 6px;
+        }
+        .control-group label {
+            font-size: 14px;
+            font-weight: 500;
+            color: white;
+        }
+        .control-group input[type="range"] {
+            width: 120px;
+        }
+        .control-group span {
+            min-width: 40px;
+            font-size: 14px;
+            color: white;
+        }
+        button {
+            padding: 10px 20px;
+            background: rgba(255,255,255,0.2);
+            color: white;
+            border: 2px solid white;
+            border-radius: 6px;
+            cursor: pointer;
+            font-size: 14px;
+            font-weight: bold;
+            transition: all 0.3s;
+        }
+        button:hover {
+            background: white;
+            color: #3498db;
+        }
+        button.active {
+            background: white;
+            color: #3498db;
+        }
+        #canvas-container {
+            width: 100%;
+            height: calc(100vh - 240px);
+            position: relative;
+            cursor: grab;
+            background: linear-gradient(to bottom, #ffffff 0%, #f8f9fa 100%);
+        }
+        #canvas-container:active {
+            cursor: grabbing;
+        }
+        .footer {
+            background: #f8f9fa;
+            border-top: 3px solid #3498db;
+            padding: 20px 30px;
+        }
+        .info-grid {
+            display: grid;
+            grid-template-columns: repeat(2, 1fr);
+            gap: 20px;
+            font-size: 13px;
+        }
+        .info-section {
+            background: white;
+            padding: 20px;
+            border-radius: 8px;
+            border-left: 4px solid #3498db;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+        .info-section h3 {
+            color: #2c3e50;
+            margin-bottom: 15px;
+            font-size: 16px;
+        }
+        .info-section div {
+            color: #555;
+            margin: 8px 0;
+            line-height: 1.6;
+        }
+        .info-section strong {
+            color: #333;
+        }
+        .legend {
+            position: absolute;
+            top: 20px;
+            left: 20px;
+            background: rgba(255,255,255,0.95);
+            padding: 15px;
+            border-radius: 8px;
+            border: 2px solid #3498db;
+            z-index: 100;
+            box-shadow: 0 4px 6px rgba(0,0,0,0.2);
+        }
+        .legend h3 {
+            color: #2c3e50;
+            margin-bottom: 10px;
+            font-size: 14px;
+            font-weight: bold;
+        }
+        .legend-item {
+            display: flex;
+            align-items: center;
+            margin: 8px 0;
+            font-size: 12px;
+            color: #333;
+        }
+        .legend-color {
+            width: 20px;
+            height: 20px;
+            border-radius: 4px;
+            margin-right: 10px;
+            border: 1px solid #ddd;
+        }
+        .controls-info {
+            position: absolute;
+            bottom: 20px;
+            right: 20px;
+            background: rgba(255,255,255,0.95);
+            padding: 15px;
+            border-radius: 8px;
+            border: 2px solid #3498db;
+            z-index: 100;
+            box-shadow: 0 4px 6px rgba(0,0,0,0.2);
+            font-size: 12px;
+            color: #333;
+        }
+        .controls-info div {
+            margin: 5px 0;
+        }
+    </style>
+</head>
+<body>
+<div class="header">
+    <h1>🌐 VXLAN Point-to-Point 네트워크</h1>
+    <div class="controls">
+        <div class="control-group">
+            <label>속도:</label>
+            <input type="range" id="speedControl" min="0" max="3" step="0.1" value="1">
+            <span id="speedValue">1.0x</span>
+        </div>
+        <div class="control-group">
+            <label>
+                <input type="checkbox" id="labelToggle" checked>
+                라벨
+            </label>
+        </div>
+        <button id="underlayBtn" class="active">Underlay</button>
+        <button id="overlayBtn" class="active">Overlay</button>
+        <button id="captureBtn">📸 캡처</button>
+    </div>
+</div>
+
+<div id="canvas-container">
+    <div class="legend">
+        <h3>📊 네트워크 레이어</h3>
+        <div class="legend-item">
+            <div class="legend-color" style="background: linear-gradient(135deg, #3498db, #2980b9);"></div>
+            <span>Underlay (물리 연결)</span>
+        </div>
+        <div class="legend-item">
+            <div class="legend-color" style="background: linear-gradient(135deg, #e74c3c, #c0392b);"></div>
+            <span>Overlay (VXLAN 터널)</span>
+        </div>
+        <div class="legend-item">
+            <div class="legend-color" style="background: linear-gradient(135deg, #e74c3c 0%, #ff6b6b 100%);"></div>
+            <span>Virtual Switch (가상)</span>
+        </div>
+        <div class="legend-item">
+            <div class="legend-color" style="background: linear-gradient(135deg, #2ecc71, #27ae60);"></div>
+            <span>VTEP 스위치</span>
+        </div>
+        <div class="legend-item">
+            <div class="legend-color" style="background: linear-gradient(135deg, #95a5a6, #7f8c8d);"></div>
+            <span>호스트</span>
+        </div>
+    </div>
+    <div class="controls-info">
+        <div><strong>🖱️ 마우스 조작</strong></div>
+        <div>• 좌클릭 + 드래그: 회전</div>
+        <div>• 스크롤: 줌 인/아웃</div>
+        <div>• 우클릭 + 드래그: 이동</div>
+    </div>
+</div>
+
+<div class="footer">
+    <div class="info-grid">
+        <div class="info-section">
+            <h3>🔷 Underlay Network (물리적 인프라)</h3>
+            <div><strong>개념:</strong> 실제 물리적 네트워크 연결</div>
+            <div><strong>프로토콜:</strong> OSPF Area 0, PIM Sparse-Mode</div>
+            <div><strong>물리적 연결:</strong>
+                <br>• N9K-1 (E1/7) ↔ N9K-2 (E1/7): 10.10.10.0/30
+                <br>• N9K-1 (E1/1) ↔ Host1: VLAN 1000
+                <br>• N9K-2 (E1/1) ↔ Host2: VLAN 1000
+                <br>• N9K-1 Loopback0: 1.1.1.1/24
+                <br>• N9K-2 Loopback0: 2.2.2.2/32
+            </div>
+            <div><strong>Multicast:</strong>
+                <br>• RP Address: 3.3.3.3 (Anycast)
+                <br>• Anycast RP: 1.1.1.1, 2.2.2.2
+            </div>
+        </div>
+        <div class="info-section">
+            <h3>🔶 Overlay Network (가상 네트워크)</h3>
+            <div><strong>개념:</strong> Underlay 위에 구축된 VXLAN 터널</div>
+            <div><strong>기술:</strong> VXLAN (L2 over L3)</div>
+            <div><strong>가상 스위치:</strong> 각 VTEP마다 가상 스위치 존재
+                <br>• Virtual Switch 1: N9K-1 내부의 논리적 스위치
+                <br>• Virtual Switch 2: N9K-2 내부의 논리적 스위치
+                <br>• 물리적으로 존재하지 않는 소프트웨어 기반 스위치
+                <br>• VXLAN 캡슐화/역캡슐화 담당
+            </div>
+            <div><strong>VXLAN 터널:</strong>
+                <br>• Virtual Switch 1 ↔ Virtual Switch 2 (VXLAN 터널)
+                <br>• VNI: 5000 (VLAN 1000 매핑)
+                <br>• Multicast Group: 230.1.1.1
+                <br>• VTEP IP: 1.1.1.1, 2.2.2.2
+            </div>
+            <div><strong>동작 원리:</strong>
+                <br>• Host1 → N9K-1 (물리적)
+                <br>• N9K-1 → Virtual Switch 1 (내부 처리)
+                <br>• Virtual Switch 1 → VXLAN 캡슐화
+                <br>• Virtual Switch 1 ↔ Virtual Switch 2 (터널)
+                <br>• Virtual Switch 2 → 역캡슐화
+                <br>• N9K-2 → Host2 (물리적)
+            </div>
+            <div><strong>특징:</strong> 각 VTEP는 내부에 가상 스위치를 가지고 있으며, 이들 간의 터널이 Overlay 네트워크를 구성</div>
+        </div>
+    </div>
+</div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+<script>
+    var scene, camera, renderer;
+    var switches = {};
+    var underlayPackets = [];
+    var overlayPackets = [];
+    var underlayLines = [];
+    var overlayLines = [];
+    var labels = [];
+    var animationSpeed = 1;
+    var showLabels = true;
+    var showUnderlay = true;
+    var showOverlay = true;
+    var time = 0;
+
+    var isDragging = false;
+    var previousMousePosition = { x: 0, y: 0 };
+    var cameraRotation = { x: 0.3, y: 0.5 };
+    var cameraDistance = 30;
+    var cameraTarget = new THREE.Vector3(0, 0, 0);
+
+    var positions = {
+        N9K1: { x: -8, y: 2, z: 0 },
+        N9K2: { x: 8, y: 2, z: 0 },
+        Host1: { x: -8, y: 0, z: -8 },
+        Host2: { x: 8, y: 0, z: -8 },
+        VirtualSwitch1: { x: -8, y: 6, z: 0 },
+        VirtualSwitch2: { x: 8, y: 6, z: 0 }
+    };
+
+    function init() {
+        var container = document.getElementById('canvas-container');
+
+        scene = new THREE.Scene();
+        scene.background = new THREE.Color(0xf5f5f5);
+        scene.fog = new THREE.Fog(0xf5f5f5, 40, 80);
+
+        camera = new THREE.PerspectiveCamera(
+            60,
+            container.clientWidth / container.clientHeight,
+            0.1,
+            1000
+        );
+        updateCameraPosition();
+
+        renderer = new THREE.WebGLRenderer({ antialias: true });
+        renderer.setSize(container.clientWidth, container.clientHeight);
+        renderer.shadowMap.enabled = true;
+        renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+        container.appendChild(renderer.domElement);
+
+        var ambientLight = new THREE.AmbientLight(0xffffff, 0.7);
+        scene.add(ambientLight);
+
+        var directionalLight = new THREE.DirectionalLight(0xffffff, 0.6);
+        directionalLight.position.set(20, 30, 20);
+        directionalLight.castShadow = true;
+        scene.add(directionalLight);
+
+        var fillLight = new THREE.DirectionalLight(0x3498db, 0.3);
+        fillLight.position.set(-20, 20, -20);
+        scene.add(fillLight);
+
+        var gridHelper = new THREE.GridHelper(40, 40, 0xcccccc, 0xe0e0e0);
+        scene.add(gridHelper);
+
+        createSwitch('N9K1', positions.N9K1, 0x2ecc71);
+        createSwitch('N9K2', positions.N9K2, 0x27ae60);
+        createVirtualSwitch('VirtualSwitch1', positions.VirtualSwitch1, 0xe74c3c);
+        createVirtualSwitch('VirtualSwitch2', positions.VirtualSwitch2, 0xe74c3c);
+        createHost('Host1', positions.Host1, 0x95a5a6);
+        createHost('Host2', positions.Host2, 0x7f8c8d);
+
+        createUnderlayConnection('N9K1', 'N9K2', 0);
+        createUnderlayConnection('N9K1', 'Host1', 1);
+        createUnderlayConnection('N9K2', 'Host2', 2);
+
+        createOverlayConnection('VirtualSwitch1', 'VirtualSwitch2', 0);
+        createLocalVTEPConnection('N9K1', 'VirtualSwitch1', 1);
+        createLocalVTEPConnection('N9K2', 'VirtualSwitch2', 2);
+        createLocalVTEPConnection('VirtualSwitch1', 'Host1', 3);
+        createLocalVTEPConnection('VirtualSwitch2', 'Host2', 4);
+
+        var posKeys = Object.keys(positions);
+        for (var i = 0; i < posKeys.length; i++) {
+            createLabel(posKeys[i], positions[posKeys[i]]);
+        }
+
+        createIPNetworkPlane();
+
+        window.addEventListener('resize', onWindowResize);
+
+        renderer.domElement.addEventListener('mousedown', onMouseDown);
+        renderer.domElement.addEventListener('mousemove', onMouseMove);
+        renderer.domElement.addEventListener('mouseup', onMouseUp);
+        renderer.domElement.addEventListener('wheel', onMouseWheel);
+        renderer.domElement.addEventListener('contextmenu', function(e) { e.preventDefault(); });
+
+        document.getElementById('speedControl').addEventListener('input', function(e) {
+            animationSpeed = parseFloat(e.target.value);
+            document.getElementById('speedValue').textContent = animationSpeed.toFixed(1) + 'x';
+        });
+
+        document.getElementById('labelToggle').addEventListener('change', function(e) {
+            showLabels = e.target.checked;
+        });
+
+        document.getElementById('underlayBtn').addEventListener('click', function() {
+            showUnderlay = !showUnderlay;
+            this.classList.toggle('active');
+        });
+
+        document.getElementById('overlayBtn').addEventListener('click', function() {
+            showOverlay = !showOverlay;
+            this.classList.toggle('active');
+        });
+
+        document.getElementById('captureBtn').addEventListener('click', captureFrame);
+
+        animate();
+    }
+
+    function createIPNetworkPlane() {
+        var planeGeo = new THREE.CircleGeometry(12, 64);
+        var planeMat = new THREE.MeshBasicMaterial({
+            color: 0x3498db,
+            transparent: true,
+            opacity: 0.15,
+            side: THREE.DoubleSide
+        });
+        var plane = new THREE.Mesh(planeGeo, planeMat);
+        plane.rotation.x = -Math.PI / 2;
+        plane.position.set(0, 6, 0);
+        scene.add(plane);
+
+        var canvas = document.createElement('canvas');
+        var ctx = canvas.getContext('2d');
+        canvas.width = 512;
+        canvas.height = 128;
+
+        ctx.fillStyle = 'rgba(52, 152, 219, 0.2)';
+        ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+        ctx.fillStyle = 'rgba(44, 62, 80, 0.8)';
+        ctx.font = 'bold 48px Arial';
+        ctx.textAlign = 'center';
+        ctx.fillText('IP Network', 256, 80);
+
+        var texture = new THREE.CanvasTexture(canvas);
+        var spriteMat = new THREE.SpriteMaterial({ map: texture, transparent: true });
+        var sprite = new THREE.Sprite(spriteMat);
+        sprite.position.set(0, 6.5, 0);
+        sprite.scale.set(10, 2.5, 1);
+        scene.add(sprite);
+    }
+
+    function onMouseDown(e) {
+        isDragging = true;
+        previousMousePosition = { x: e.clientX, y: e.clientY };
+    }
+
+    function onMouseMove(e) {
+        if (!isDragging) return;
+
+        var deltaX = e.clientX - previousMousePosition.x;
+        var deltaY = e.clientY - previousMousePosition.y;
+
+        if (e.buttons === 1) {
+            cameraRotation.y += deltaX * 0.005;
+            cameraRotation.x += deltaY * 0.005;
+            cameraRotation.x = Math.max(-Math.PI / 2, Math.min(Math.PI / 2, cameraRotation.x));
+        } else if (e.buttons === 2) {
+            var right = new THREE.Vector3();
+            var up = new THREE.Vector3(0, 1, 0);
+            camera.getWorldDirection(right);
+            right.cross(up).normalize();
+
+            cameraTarget.add(right.multiplyScalar(-deltaX * 0.02));
+            cameraTarget.y -= deltaY * 0.02;
+        }
+
+        updateCameraPosition();
+        previousMousePosition = { x: e.clientX, y: e.clientY };
+    }
+
+    function onMouseUp() {
+        isDragging = false;
+    }
+
+    function onMouseWheel(e) {
+        e.preventDefault();
+        cameraDistance += e.deltaY * 0.02;
+        cameraDistance = Math.max(10, Math.min(60, cameraDistance));
+        updateCameraPosition();
+    }
+
+    function updateCameraPosition() {
+        var x = cameraDistance * Math.sin(cameraRotation.y) * Math.cos(cameraRotation.x);
+        var y = cameraDistance * Math.sin(cameraRotation.x);
+        var z = cameraDistance * Math.cos(cameraRotation.y) * Math.cos(cameraRotation.x);
+
+        camera.position.set(
+            cameraTarget.x + x,
+            cameraTarget.y + y,
+            cameraTarget.z + z
+        );
+        camera.lookAt(cameraTarget);
+    }
+
+    function createSwitch(name, position, color) {
+        var group = new THREE.Group();
+
+        var bodyGeo = new THREE.BoxGeometry(2.5, 3, 2.5);
+        var bodyMat = new THREE.MeshPhongMaterial({
+            color: color,
+            specular: 0x666666,
+            shininess: 40
+        });
+        var body = new THREE.Mesh(bodyGeo, bodyMat);
+        body.castShadow = true;
+        body.receiveShadow = true;
+        group.add(body);
+
+        var edgesGeo = new THREE.EdgesGeometry(bodyGeo);
+        var edgesMat = new THREE.LineBasicMaterial({ color: 0x2c3e50, linewidth: 2 });
+        var edges = new THREE.LineSegments(edgesGeo, edgesMat);
+        group.add(edges);
+
+        for (var i = 0; i < 6; i++) {
+            var panelGeo = new THREE.BoxGeometry(2.6, 0.35, 0.1);
+            var panelMat = new THREE.MeshPhongMaterial({ color: 0x34495e });
+            var panel = new THREE.Mesh(panelGeo, panelMat);
+            panel.position.set(0, -1.3 + i * 0.5, 1.26);
+            group.add(panel);
+
+            for (var j = 0; j < 4; j++) {
+                var portGeo = new THREE.BoxGeometry(0.15, 0.15, 0.05);
+                var portMat = new THREE.MeshBasicMaterial({ color: 0x2c3e50 });
+                var port = new THREE.Mesh(portGeo, portMat);
+                port.position.set(-0.9 + j * 0.6, -1.3 + i * 0.5, 1.32);
+                group.add(port);
+            }
+        }
+
+        var leds = [];
+        for (var i = 0; i < 10; i++) {
+            var ledGeo = new THREE.SphereGeometry(0.08);
+            var ledMat = new THREE.MeshBasicMaterial({
+                color: 0x2ecc71,
+                emissive: 0x2ecc71,
+                emissiveIntensity: 0.5
+            });
+            var led = new THREE.Mesh(ledGeo, ledMat);
+            led.position.set(-1 + i * 0.22, 1.3, 1.27);
+            led.userData = { ledIndex: i, material: ledMat };
+            group.add(led);
+            leds.push(led);
+        }
+        group.userData.leds = leds;
+
+        var vtepGeo = new THREE.BoxGeometry(2, 0.4, 0.15);
+        var vtepMat = new THREE.MeshBasicMaterial({
+            color: 0xe74c3c,
+            emissive: 0xe74c3c,
+            emissiveIntensity: 0.3
+        });
+        var vtep = new THREE.Mesh(vtepGeo, vtepMat);
+        vtep.position.set(0, -1.7, 1.28);
+        group.add(vtep);
+
+        group.position.set(position.x, position.y, position.z);
+        scene.add(group);
+        switches[name] = group;
+    }
+
+    function createVirtualSwitch(name, position, color) {
+        var group = new THREE.Group();
+
+        var bodyGeo = new THREE.BoxGeometry(3, 1, 3);
+        var bodyMat = new THREE.MeshPhongMaterial({
+            color: color,
+            transparent: true,
+            opacity: 0.7,
+            specular: 0x888888,
+            shininess: 60,
+            emissive: color,
+            emissiveIntensity: 0.4
+        });
+        var body = new THREE.Mesh(bodyGeo, bodyMat);
+        group.add(body);
+
+        var wireframeGeo = new THREE.EdgesGeometry(bodyGeo);
+        var wireframeMat = new THREE.LineBasicMaterial({
+            color: 0xff6b6b,
+            linewidth: 3,
+            transparent: true,
+            opacity: 0.8
+        });
+        var wireframe = new THREE.LineSegments(wireframeGeo, wireframeMat);
+        group.add(wireframe);
+
+        var glowGeo = new THREE.BoxGeometry(3.5, 1.5, 3.5);
+        var glowMat = new THREE.MeshBasicMaterial({
+            color: color,
+            transparent: true,
+            opacity: 0.15,
+            side: THREE.BackSide
+        });
+        var glow = new THREE.Mesh(glowGeo, glowMat);
+        group.add(glow);
+        group.userData.glow = glow;
+
+        for (var i = 0; i < 4; i++) {
+            var angle = (i / 4) * Math.PI * 2;
+            var radius = 1.8;
+            var portGeo = new THREE.CylinderGeometry(0.1, 0.1, 0.3);
+            var portMat = new THREE.MeshBasicMaterial({
+                color: 0xffff00,
+                emissive: 0xffff00,
+                emissiveIntensity: 0.8
+            });
+            var port = new THREE.Mesh(portGeo, portMat);
+            port.position.set(
+                Math.cos(angle) * radius,
+                0,
+                Math.sin(angle) * radius
+            );
+            port.rotation.z = Math.PI / 2;
+            group.add(port);
+        }
+
+        var canvas = document.createElement('canvas');
+        var ctx = canvas.getContext('2d');
+        canvas.width = 256;
+        canvas.height = 128;
+
+        ctx.fillStyle = 'rgba(231, 76, 60, 0.9)';
+        ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+        ctx.fillStyle = 'white';
+        ctx.font = 'bold 28px Arial';
+        ctx.textAlign = 'center';
+        ctx.fillText('Virtual', 128, 50);
+        ctx.fillText('Switch', 128, 85);
+
+        var texture = new THREE.CanvasTexture(canvas);
+        var labelMat = new THREE.SpriteMaterial({ map: texture, transparent: true });
+        var label = new THREE.Sprite(labelMat);
+        label.position.set(0, 0, 1.6);
+        label.scale.set(3, 1.5, 1);
+        group.add(label);
+
+        group.position.set(position.x, position.y, position.z);
+        scene.add(group);
+        switches[name] = group;
+    }
+
+    function createLocalVTEPConnection(from, to, index) {
+        var fromPos = positions[from];
+        var toPos = positions[to];
+
+        var curve = new THREE.LineCurve3(
+            new THREE.Vector3(fromPos.x, fromPos.y, fromPos.z),
+            new THREE.Vector3(toPos.x, toPos.y, toPos.z)
+        );
+
+        var points = curve.getPoints(20);
+        var geometry = new THREE.BufferGeometry().setFromPoints(points);
+        var material = new THREE.LineDashedMaterial({
+            color: 0xff6b6b,
+            linewidth: 2,
+            dashSize: 0.3,
+            gapSize: 0.2,
+            transparent: true,
+            opacity: 0.6
+        });
+
+        var line = new THREE.Line(geometry, material);
+        line.computeLineDistances();
+        scene.add(line);
+        overlayLines.push(line);
+
+        var tubeGeo = new THREE.TubeGeometry(curve, 20, 0.06, 8, false);
+        var tubeMat = new THREE.MeshPhongMaterial({
+            color: 0xff6b6b,
+            transparent: true,
+            opacity: 0.3,
+            emissive: 0xff6b6b,
+            emissiveIntensity: 0.2
+        });
+        var tube = new THREE.Mesh(tubeGeo, tubeMat);
+        scene.add(tube);
+        overlayLines.push(tube);
+    }
+
+    function createHost(name, position, color) {
+        var group = new THREE.Group();
+
+        var bodyGeo = new THREE.BoxGeometry(1.8, 2.5, 1.8);
+        var bodyMat = new THREE.MeshPhongMaterial({
+            color: color,
+            specular: 0x555555,
+            shininess: 30
+        });
+        var body = new THREE.Mesh(bodyGeo, bodyMat);
+        body.castShadow = true;
+        body.receiveShadow = true;
+        group.add(body);
+
+        var edgesGeo = new THREE.EdgesGeometry(bodyGeo);
+        var edgesMat = new THREE.LineBasicMaterial({ color: 0x2c3e50, linewidth: 2 });
+        var edges = new THREE.LineSegments(edgesGeo, edgesMat);
+        group.add(edges);
+
+        var screenGeo = new THREE.PlaneGeometry(1.3, 1.3);
+        var screenMat = new THREE.MeshBasicMaterial({
+            color: 0x34495e,
+            emissive: 0x3498db,
+            emissiveIntensity: 0.2
+        });
+        var screen = new THREE.Mesh(screenGeo, screenMat);
+        screen.position.set(0, 0.2, 0.91);
+        group.add(screen);
+
+        var bezelGeo = new THREE.PlaneGeometry(1.5, 1.5);
+        var bezelMat = new THREE.MeshBasicMaterial({ color: 0x2c3e50 });
+        var bezel = new THREE.Mesh(bezelGeo, bezelMat);
+        bezel.position.set(0, 0.2, 0.9);
+        group.add(bezel);
+
+        group.position.set(position.x, position.y, position.z);
+        scene.add(group);
+        switches[name] = group;
+    }
+
+    function createUnderlayConnection(from, to, index) {
+        var fromPos = positions[from];
+        var toPos = positions[to];
+
+        var curve = new THREE.LineCurve3(
+            new THREE.Vector3(fromPos.x, fromPos.y, fromPos.z),
+            new THREE.Vector3(toPos.x, toPos.y, toPos.z)
+        );
+
+        var points = curve.getPoints(50);
+        var geometry = new THREE.BufferGeometry().setFromPoints(points);
+        var material = new THREE.LineBasicMaterial({
+            color: 0x3498db,
+            linewidth: 3,
+            transparent: true,
+            opacity: 0.8
+        });
+
+        var line = new THREE.Line(geometry, material);
+        scene.add(line);
+        underlayLines.push(line);
+
+        var tubeGeo = new THREE.TubeGeometry(curve, 20, 0.08, 8, false);
+        var tubeMat = new THREE.MeshPhongMaterial({
+            color: 0x3498db,
+            transparent: true,
+            opacity: 0.6,
+            emissive: 0x3498db,
+            emissiveIntensity: 0.2
+        });
+        var tube = new THREE.Mesh(tubeGeo, tubeMat);
+        scene.add(tube);
+        underlayLines.push(tube);
+
+        for (var i = 0; i < 4; i++) {
+            var packetGeo = new THREE.SphereGeometry(0.15);
+            var packetMat = new THREE.MeshBasicMaterial({
+                color: 0x3498db,
+                transparent: true,
+                opacity: 0.9
+            });
+            var packet = new THREE.Mesh(packetGeo, packetMat);
+
+            packet.userData = {
+                curve: curve,
+                progress: i * 0.25,
+                speed: 0.3,
+                index: index
+            };
+            scene.add(packet);
+            underlayPackets.push(packet);
+        }
+    }
+
+    function createOverlayConnection(from, to, index) {
+        var fromPos = positions[from];
+        var toPos = positions[to];
+
+        var midY = Math.max(fromPos.y, toPos.y) + 3;
+        if (from === 'VirtualSwitch' || to === 'VirtualSwitch') {
+            midY = (fromPos.y + toPos.y) / 2;
+        }
+
+        var curve = new THREE.QuadraticBezierCurve3(
+            new THREE.Vector3(fromPos.x, fromPos.y, fromPos.z),
+            new THREE.Vector3((fromPos.x + toPos.x) / 2, midY, (fromPos.z + toPos.z) / 2),
+            new THREE.Vector3(toPos.x, toPos.y, toPos.z)
+        );
+
+        var points = curve.getPoints(50);
+        var geometry = new THREE.BufferGeometry().setFromPoints(points);
+        var material = new THREE.LineBasicMaterial({
+            color: 0xe74c3c,
+            linewidth: 4,
+            transparent: true,
+            opacity: 0.7
+        });
+
+        var line = new THREE.Line(geometry, material);
+        scene.add(line);
+        overlayLines.push(line);
+
+        var tubeGeo = new THREE.TubeGeometry(curve, 50, 0.12, 8, false);
+        var tubeMat = new THREE.MeshPhongMaterial({
+            color: 0xe74c3c,
+            transparent: true,
+            opacity: 0.5,
+            emissive: 0xe74c3c,
+            emissiveIntensity: 0.3
+        });
+        var tube = new THREE.Mesh(tubeGeo, tubeMat);
+        scene.add(tube);
+        overlayLines.push(tube);
+
+        for (var i = 0; i < 3; i++) {
+            var packetGeo = new THREE.SphereGeometry(0.25);
+            var packetMat = new THREE.MeshBasicMaterial({
+                color: 0xf39c12,
+                transparent: true,
+                opacity: 0.9,
+                emissive: 0xf39c12,
+                emissiveIntensity: 0.5
+            });
+            var packet = new THREE.Mesh(packetGeo, packetMat);
+
+            packet.userData = {
+                curve: curve,
+                progress: i * 0.33,
+                speed: 0.2,
+                index: index
+            };
+            scene.add(packet);
+            overlayPackets.push(packet);
+        }
+    }
+
+    function createHostConnection(from, to, index) {
+        var fromPos = positions[from];
+        var toPos = positions[to];
+
+        var curve = new THREE.LineCurve3(
+            new THREE.Vector3(fromPos.x, fromPos.y, fromPos.z),
+            new THREE.Vector3(toPos.x, toPos.y, toPos.z)
+        );
+
+        var points = curve.getPoints(20);
+        var geometry = new THREE.BufferGeometry().setFromPoints(points);
+        var material = new THREE.LineBasicMaterial({
+            color: 0x95a5a6,
+            linewidth: 2,
+            transparent: true,
+            opacity: 0.6
+        });
+
+        var line = new THREE.Line(geometry, material);
+        scene.add(line);
+        overlayLines.push(line);
+
+        var tubeGeo = new THREE.TubeGeometry(curve, 20, 0.05, 8, false);
+        var tubeMat = new THREE.MeshPhongMaterial({
+            color: 0x95a5a6,
+            transparent: true,
+            opacity: 0.4
+        });
+        var tube = new THREE.Mesh(tubeGeo, tubeMat);
+        scene.add(tube);
+        overlayLines.push(tube);
+    }
+
+    function createLabel(text, position) {
+        var canvas = document.createElement('canvas');
+        var ctx = canvas.getContext('2d');
+        canvas.width = 256;
+        canvas.height = 80;
+
+        ctx.fillStyle = 'rgba(255, 255, 255, 0.95)';
+        ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+        ctx.strokeStyle = '#3498db';
+        ctx.lineWidth = 4;
+        ctx.strokeRect(2, 2, canvas.width - 4, canvas.height - 4);
+
+        ctx.fillStyle = '#2c3e50';
+        ctx.font = 'bold 32px Arial';
+        ctx.textAlign = 'center';
+        ctx.fillText(text, 128, 50);
+
+        var texture = new THREE.CanvasTexture(canvas);
+        var material = new THREE.SpriteMaterial({ map: texture });
+        var sprite = new THREE.Sprite(material);
+        sprite.position.set(position.x, position.y + 3, position.z);
+        sprite.scale.set(4, 1, 1);
+        scene.add(sprite);
+        labels.push(sprite);
+    }
+
+    function animate() {
+        requestAnimationFrame(animate);
+        time += 0.016 * animationSpeed;
+
+        var switchKeys = Object.keys(switches);
+        for (var i = 0; i < switchKeys.length; i++) {
+            var sw = switches[switchKeys[i]];
+            if (sw.userData.leds) {
+                var leds = sw.userData.leds;
+                for (var j = 0; j < leds.length; j++) {
+                    var led = leds[j];
+                    var brightness = Math.sin(time * 5 + led.userData.ledIndex * 0.6) * 0.3 + 0.7;
+                    led.userData.material.emissiveIntensity = brightness;
+                }
+            }
+            if (sw.userData.glow) {
+                var glowScale = 1 + Math.sin(time * 2) * 0.1;
+                sw.userData.glow.scale.set(glowScale, glowScale, glowScale);
+                sw.userData.glow.material.opacity = 0.1 + Math.sin(time * 2) * 0.05;
+            }
+            if (switchKeys[i] === 'VirtualSwitch1' || switchKeys[i] === 'VirtualSwitch2') {
+                sw.rotation.y = time * 0.3;
+            }
+        }
+
+        for (var i = 0; i < underlayPackets.length; i++) {
+            var packet = underlayPackets[i];
+            packet.userData.progress += 0.01 * packet.userData.speed * animationSpeed;
+            if (packet.userData.progress > 1) {
+                packet.userData.progress = 0;
+            }
+
+            var point = packet.userData.curve.getPoint(packet.userData.progress);
+            packet.position.copy(point);
+            packet.visible = showUnderlay;
+        }
+
+        for (var i = 0; i < overlayPackets.length; i++) {
+            var packet = overlayPackets[i];
+            packet.userData.progress += 0.008 * packet.userData.speed * animationSpeed;
+            if (packet.userData.progress > 1) {
+                packet.userData.progress = 0;
+            }
+
+            var point = packet.userData.curve.getPoint(packet.userData.progress);
+            packet.position.copy(point);
+
+            var scale = 1 + Math.sin(time * 4 + packet.userData.index) * 0.2;
+            packet.scale.set(scale, scale, scale);
+            packet.visible = showOverlay;
+        }
+
+        for (var i = 0; i < underlayLines.length; i++) {
+            underlayLines[i].visible = showUnderlay;
+        }
+
+        for (var i = 0; i < overlayLines.length; i++) {
+            overlayLines[i].visible = showOverlay;
+        }
+
+        for (var i = 0; i < labels.length; i++) {
+            labels[i].visible = showLabels;
+        }
+
+        renderer.render(scene, camera);
+    }
+
+    function onWindowResize() {
+        var container = document.getElementById('canvas-container');
+        camera.aspect = container.clientWidth / container.clientHeight;
+        camera.updateProjectionMatrix();
+        renderer.setSize(container.clientWidth, container.clientHeight);
+    }
+
+    function captureFrame() {
+        var dataUrl = renderer.domElement.toDataURL('image/png');
+        var link = document.createElement('a');
+        link.download = 'vxlan-p2p-network-' + Date.now() + '.png';
+        link.href = dataUrl;
+        link.click();
+    }
+
+    init();
+</script>
+</body>
+</html>
